@@ -630,13 +630,10 @@ function Toggle({ on, onChange }) {
 function StarButton({ active, onClick, theme }) {
   return (
     <button onClick={onClick} style={{ padding: 6, lineHeight: 1, flexShrink: 0 }} aria-label="관심종목">
-      <svg width="22" height="22" viewBox="0 0 24 24">
+      <svg width="24" height="24" viewBox="0 0 24 24">
         <path
-          d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.77 6.2 20.84l1.11-6.46-4.7-4.58 6.49-.94z"
-          fill={active ? "#ffb400" : "none"}
-          stroke={active ? "#ffb400" : theme.sub}
-          strokeWidth="1.6"
-          strokeLinejoin="round"
+          d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+          fill={active ? "#f5476b" : theme.sub}
         />
       </svg>
     </button>
@@ -646,37 +643,31 @@ function StarButton({ active, onClick, theme }) {
 function StockRow({ stock, theme, starred, onToggleStar, onOpen, loading }) {
   const up = stock.change >= 0;
   const c = up ? UP : DOWN;
+  const ell = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
   return (
-    <div onClick={onOpen} className="flex items-center gap-3 cursor-pointer" style={{ padding: "14px 4px" }}>
+    <div
+      onClick={onOpen}
+      style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "13px 4px" }}
+    >
       <StockLogo stock={stock} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-bold truncate" style={{ color: theme.text, fontSize: 16 }}>
-            {stock.name}
-          </span>
-          <span
-            className="font-medium"
-            style={{ fontSize: 11, color: BRAND, backgroundColor: theme.chip, padding: "2px 7px", borderRadius: 6, flexShrink: 0 }}
-          >
-            {stock.sector}
-          </span>
-        </div>
-        {loading ? (
-          <div className="pg-shimmer" style={{ width: 96, height: 15, borderRadius: 6, marginTop: 5 }} />
-        ) : (
-          <div className="font-bold" style={{ color: theme.text, fontSize: 15, marginTop: 3 }}>
-            {won(stock.price)}원
-            <span style={{ color: c, fontSize: 13, fontWeight: 600, marginLeft: 6 }}>
-              {up ? "+" : ""}
-              {stock.changePct}%
-            </span>
-          </div>
-        )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ ...ell, color: theme.text, fontSize: 16, fontWeight: 700 }}>{stock.name}</div>
+        <div style={{ ...ell, color: theme.sub, fontSize: 12.5, marginTop: 2 }}>{stock.sector}</div>
       </div>
       {loading ? (
-        <div className="pg-shimmer" style={{ width: 64, height: 32, borderRadius: 8, flexShrink: 0 }} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+          <div className="pg-shimmer" style={{ width: 50, height: 13, borderRadius: 5 }} />
+          <div className="pg-shimmer" style={{ width: 74, height: 14, borderRadius: 5 }} />
+        </div>
       ) : (
-        <Sparkline data={stock.spark} color={c} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.2, flexShrink: 0 }}>
+          <span style={{ color: c, fontSize: 13, fontWeight: 700 }}>
+            {up ? "+" : ""}{stock.changePct}%
+          </span>
+          <span style={{ color: theme.text, fontSize: 15.5, fontWeight: 700, marginTop: 2 }}>
+            {won(stock.price)}원
+          </span>
+        </div>
       )}
       <StarButton active={starred} theme={theme} onClick={(e) => { e.stopPropagation(); onToggleStar(); }} />
     </div>
@@ -1052,57 +1043,79 @@ export default function App() {
     try {
       let result = null;
 
-      // (연도 × 보고서) 후보를 최신순으로 시도 → 데이터 있는 첫 조합 사용
+      // (연도 × 보고서 × 재무구분) 후보를 최신순으로 시도 → 데이터 있는 첫 조합 사용
       outer: for (const year of conf.years(nowY)) {
         for (const reprt of conf.reprts) {
-          const url =
-            `${DART_BASE}/api/fnlttSinglAcntAll.json` +
-            `?crtfc_key=${encodeURIComponent(key)}` +
-            `&corp_code=${encodeURIComponent(corp)}` +
-            `&bsns_year=${year}` +
-            `&reprt_code=${reprt}`;
+          for (const fsDiv of ["CFS", "OFS"]) {
+            // CFS=연결 우선, 없으면 OFS=개별 폴백
+            const url =
+              `${DART_BASE}/api/fnlttSinglAcntAll.json` +
+              `?crtfc_key=${encodeURIComponent(key)}` +
+              `&corp_code=${encodeURIComponent(corp)}` +
+              `&bsns_year=${year}` +
+              `&reprt_code=${reprt}` +
+              `&fs_div=${fsDiv}`; // 필수값 (없으면 status 100 거부)
 
-          const res = await fetch(url, { method: "GET", mode: "cors" });
-          if (!res.ok) {
-            console.warn("[DART]", id, year, reprt, "HTTP", res.status);
-            continue;
-          }
-          const json = await res.json();
-          if (json.status !== "000") {
-            console.warn("[DART]", id, year, reprt, json.status, json.message);
-            continue;
-          }
+            const res = await fetch(url, { method: "GET", mode: "cors" });
+            if (!res.ok) {
+              console.warn("[DART]", id, year, reprt, fsDiv, "HTTP", res.status);
+              continue;
+            }
+            const json = await res.json();
+            if (json.status !== "000") {
+              console.warn("[DART]", id, year, reprt, fsDiv, json.status, json.message);
+              continue;
+            }
 
-          const list = Array.isArray(json.list) ? json.list : [];
-          // 연결(CFS) 우선, 없으면 전체
-          const hasCFS = list.some((it) => it.fs_div === "CFS");
-          const scoped = hasCFS ? list.filter((it) => it.fs_div === "CFS") : list;
+            const list = Array.isArray(json.list) ? json.list : [];
+            const scoped = list; // fs_div 로 이미 연결/개별이 결정됨
 
-          const norm = (v) => String(v || "").replace(/\s/g, "");
-          const find = (names, sjs) => {
-            const it = scoped.find(
-              (x) => sjs.includes(x.sj_div) && names.some((nm) => norm(x.account_nm).includes(nm))
+            const norm = (v) => String(v || "").replace(/\s/g, "");
+            const find = (names, sjs) => {
+              const it = scoped.find(
+                (x) => sjs.includes(x.sj_div) && names.some((nm) => norm(x.account_nm).includes(nm))
+              );
+              return it ? fmtDartAmount(it.thstrm_amount) : null;
+            };
+
+            const values = {};
+            const set = (k, v) => { if (v) values[k] = v; };
+            set("자산총계", find(["자산총계"], ["BS"]));
+            set("부채총계", find(["부채총계"], ["BS"]));
+            set("자본총계", find(["자본총계"], ["BS"]));
+            set("매출액", find(["매출액", "수익(매출액)", "영업수익"], ["IS", "CIS"]));
+            set("영업이익", find(["영업이익"], ["IS", "CIS"]));
+            set("당기순이익", find(["당기순이익"], ["IS", "CIS"]));
+
+            // 최근 3개년 매출 추이 (당기/전기/전전기) — 조 단위, 오래된→최신 순
+            let revenue = null;
+            const salesItem = scoped.find(
+              (x) =>
+                ["IS", "CIS"].includes(x.sj_div) &&
+                ["매출액", "수익(매출액)", "영업수익"].some((nm) => norm(x.account_nm).includes(nm))
             );
-            return it ? fmtDartAmount(it.thstrm_amount) : null;
-          };
+            if (salesItem) {
+              const toJo = (raw) => {
+                const n = parseFloat(String(raw || "").replace(/,/g, ""));
+                return isFinite(n) ? Math.round(n / 1e12) : null;
+              };
+              const arr = [
+                { year: String(year - 2), value: toJo(salesItem.bfefrmtrm_amount) },
+                { year: String(year - 1), value: toJo(salesItem.frmtrm_amount) },
+                { year: String(year), value: toJo(salesItem.thstrm_amount) },
+              ].filter((r) => r.value != null && r.value > 0);
+              if (arr.length >= 2) revenue = arr;
+            }
 
-          const values = {};
-          const set = (k, v) => { if (v) values[k] = v; };
-          set("자산총계", find(["자산총계"], ["BS"]));
-          set("부채총계", find(["부채총계"], ["BS"]));
-          set("자본총계", find(["자본총계"], ["BS"]));
-          set("매출액", find(["매출액", "수익(매출액)", "영업수익"], ["IS", "CIS"]));
-          set("영업이익", find(["영업이익"], ["IS", "CIS"]));
-          set("당기순이익", find(["당기순이익"], ["IS", "CIS"]));
+            // 전체 재무제표(모든 계정과목)
+            const full = scoped
+              .map((x) => ({ sj: x.sj_div, name: x.account_nm, amount: fmtDartAmount(x.thstrm_amount) }))
+              .filter((x) => x.name && x.amount);
 
-          // 전체 재무제표(모든 계정과목)
-          const full = scoped
-            .map((x) => ({ sj: x.sj_div, name: x.account_nm, amount: fmtDartAmount(x.thstrm_amount) }))
-            .filter((x) => x.name && x.amount);
-
-          if (Object.keys(values).length > 0 || full.length > 0) {
-            result = { values, full, year, reprt };
-            break outer;
+            if (Object.keys(values).length > 0 || full.length > 0) {
+              result = { values, full, year, reprt, revenue };
+              break outer;
+            }
           }
         }
       }
@@ -1581,7 +1594,6 @@ export default function App() {
       : selected;
     const up = s.change >= 0;
     const c = up ? UP : DOWN;
-    const maxRev = Math.max(...s.revenue.map((r) => r.value));
     const news = MOCK_NEWS[s.id] || [];
     const aiNews = NEWS_AI_SUMMARY[s.id] || [];
     const R = 28;
@@ -1597,6 +1609,13 @@ export default function App() {
     const finPending = finLoading && liveFin === undefined; // 이 (종목·기간) 조회 진행 중
     const dispFin = { ...s.financials, ...(liveVals || {}) };
     const LIVE_KEYS = ["자산총계", "부채총계", "자본총계", "매출액", "영업이익", "당기순이익"]; // DART 실시간 대체 항목
+
+    // 매출 추이는 '연간' 본질 → 토글과 무관하게 항상 연간 캐시에서 읽음
+    const annualFin = finData[`${s.id}_annual`];
+    const dispRevenue = annualFin?.revenue && annualFin.revenue.length >= 2 ? annualFin.revenue : s.revenue;
+    const revenueIsLive = !!(annualFin?.revenue && annualFin.revenue.length >= 2);
+    const revPending = finLoading && annualFin === undefined; // 연간(차트) 조회 진행 중
+    const maxRev = Math.max(...dispRevenue.map((r) => r.value));
 
     // 구역별 카드 스타일 (가독성 위해 섹션마다 분리)
     const card = { backgroundColor: theme.surface2, border: `1px solid ${theme.line}`, borderRadius: 16, padding: 18, marginBottom: 14 };
@@ -1719,21 +1738,38 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* 구역 5: 최근 3개년 매출 추이 */}
+                {/* 구역 5: 최근 3개년 매출 추이 (항상 연간 기준) */}
                 <div style={card}>
-                  <div style={cardTitle}>최근 3개년 매출 추이</div>
-                  <div className="flex items-end justify-around" style={{ height: 168, marginTop: 8 }}>
-                    {s.revenue.map((r, i) => {
-                      const h = (r.value / maxRev) * 104 + 8;
-                      return (
-                        <div key={r.year} className="flex flex-col items-center justify-end" style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: theme.text, marginBottom: 6 }}>{r.value}조</div>
-                          <div style={{ width: 44, height: h, borderRadius: 8, background: i === s.revenue.length - 1 ? BRAND : dark ? "#2a3656" : "#cdd9ff" }} />
-                          <div style={{ fontSize: 12, color: theme.sub, marginTop: 8 }}>{r.year}</div>
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 800, color: theme.text }}>최근 3개년 매출 추이</span>
+                    {revenueIsLive && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: BRAND, backgroundColor: theme.chip, padding: "1px 6px", borderRadius: 5 }}>
+                        DART
+                      </span>
+                    )}
                   </div>
+                  {revPending ? (
+                    <div className="flex items-end justify-around" style={{ height: 168, marginTop: 8 }}>
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="flex flex-col items-center justify-end" style={{ flex: 1 }}>
+                          <div className="pg-shimmer" style={{ width: 44, height: 60 + i * 24, borderRadius: 8 }} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-end justify-around" style={{ height: 168, marginTop: 8 }}>
+                      {dispRevenue.map((r, i) => {
+                        const h = (r.value / maxRev) * 104 + 8;
+                        return (
+                          <div key={r.year} className="flex flex-col items-center justify-end" style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: theme.text, marginBottom: 6 }}>{r.value}조</div>
+                            <div style={{ width: 44, height: h, borderRadius: 8, background: i === dispRevenue.length - 1 ? BRAND : dark ? "#2a3656" : "#cdd9ff" }} />
+                            <div style={{ fontSize: 12, color: theme.sub, marginTop: 8 }}>{r.year}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* 구역 6: Open DART 전체 재무제표 */}
@@ -1748,7 +1784,7 @@ export default function App() {
 
                   {dartOpen && (
                     <div style={{ borderTop: `1px solid ${theme.line}` }}>
-                      {/* 연간 / 분기 전환 토글 */}
+                      {/* 연간 / 분기 전환 토글 (재무제표 표에만 적용) */}
                       <div className="flex" style={{ gap: 6, padding: "12px 12px 0" }}>
                         {Object.entries(DART_PERIODS).map(([pk, pc]) => {
                           const on = dartPeriod === pk;
@@ -1939,6 +1975,30 @@ export default function App() {
         button:disabled{cursor:default;}
         @keyframes pg-shimmer{0%{background-position:-200px 0;}100%{background-position:200px 0;}}
         .pg-shimmer{background:linear-gradient(90deg,rgba(150,160,175,0.12) 25%,rgba(150,160,175,0.28) 37%,rgba(150,160,175,0.12) 63%);background-size:400px 100%;animation:pg-shimmer 1.3s ease-in-out infinite;}
+        /* --- Tailwind 유틸 shim: 프로젝트 Tailwind 설정과 무관하게 레이아웃 보장 --- */
+        .flex{display:flex;}
+        .flex-col{flex-direction:column;}
+        .flex-1{flex:1 1 0%;}
+        .flex-wrap{flex-wrap:wrap;}
+        .flex-shrink-0{flex-shrink:0;}
+        .min-w-0{min-width:0;}
+        .items-center{align-items:center;}
+        .items-end{align-items:flex-end;}
+        .items-start{align-items:flex-start;}
+        .justify-center{justify-content:center;}
+        .justify-between{justify-content:space-between;}
+        .justify-end{justify-content:flex-end;}
+        .justify-around{justify-content:space-around;}
+        .gap-1{gap:4px;}
+        .gap-1\\.5{gap:6px;}
+        .gap-2{gap:8px;}
+        .gap-3{gap:12px;}
+        .gap-4{gap:16px;}
+        .rounded-full{border-radius:9999px;}
+        .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .font-bold{font-weight:700;}
+        .font-medium{font-weight:500;}
+        .cursor-pointer{cursor:pointer;}
       `}</style>
 
       {/* 화면 프레임 (외부 베젤 없음) */}
