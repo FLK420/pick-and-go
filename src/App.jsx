@@ -1953,12 +1953,9 @@ export default function App() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         width: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#e5e8eb",
+        backgroundColor: theme.bg,
         fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, sans-serif',
       }}
     >
@@ -2001,46 +1998,22 @@ export default function App() {
         .cursor-pointer{cursor:pointer;}
       `}</style>
 
-      {/* 화면 프레임 (외부 베젤 없음) */}
+      {/* 화면 프레임 (실기기 풀스크린 / 데스크톱은 480px 중앙 정렬) */}
       <div
         style={{
           position: "relative",
           width: "100%",
-          maxWidth: 412,
-          height: "100vh",
-          maxHeight: 880,
+          maxWidth: 480,
+          margin: "0 auto",
+          height: "100dvh",
           backgroundColor: theme.bg,
           overflow: "hidden",
-          borderRadius: 44,
           display: "flex",
           flexDirection: "column",
-          boxShadow: "0 24px 70px rgba(0,0,0,0.18)",
-          flexShrink: 0,
         }}
       >
-          {/* 다이내믹 아일랜드 */}
-          <div style={{ position: "absolute", top: 11, left: "50%", transform: "translateX(-50%)", width: 120, height: 34, borderRadius: 999, backgroundColor: "#000", zIndex: 100 }} />
-
-          {/* iOS 상태바 */}
-          <div className="flex items-center justify-between" style={{ flexShrink: 0, height: 54, padding: "0 30px 0 34px", color: theme.text }}>
-            <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em" }}>9:41</span>
-            <span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-              {/* 셀룰러 */}
-              <svg width="18" height="12" viewBox="0 0 18 12" fill={theme.text}><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0.5" width="3" height="11.5" rx="1" /></svg>
-              {/* 와이파이 */}
-              <svg width="17" height="12" viewBox="0 0 17 12" fill={theme.text}><path d="M8.5 2.2c2.6 0 5 1 6.8 2.7l1.4-1.5C14.5 1.2 11.6 0 8.5 0 5.4 0 2.5 1.2.3 3.4l1.4 1.5C3.5 3.2 5.9 2.2 8.5 2.2Z" /><path d="M8.5 6c1.4 0 2.7.5 3.7 1.5l1.4-1.5C12.2 4.7 10.4 4 8.5 4 6.6 4 4.8 4.7 3.4 6l1.4 1.5C5.8 6.5 7.1 6 8.5 6Z" /><path d="M8.5 9.8 10.6 7.6C10.1 7 9.3 6.6 8.5 6.6c-.8 0-1.6.4-2.1 1L8.5 9.8Z" /></svg>
-              {/* 배터리 */}
-              <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <span style={{ display: "block", width: 24, height: 12, borderRadius: 3, border: `1px solid ${theme.text}`, opacity: 0.95, padding: 1.5 }}>
-                  <span style={{ display: "block", width: "80%", height: "100%", borderRadius: 1.5, backgroundColor: theme.text }} />
-                </span>
-                <span style={{ width: 1.5, height: 4, borderRadius: 1, backgroundColor: theme.text, opacity: 0.5 }} />
-              </span>
-            </span>
-          </div>
-
           {/* 앱 헤더 (PICK & GO) */}
-          <div style={{ flexShrink: 0, backgroundColor: theme.bg, padding: "0 20px 8px" }}>
+          <div style={{ flexShrink: 0, backgroundColor: theme.bg, padding: "max(8px, env(safe-area-inset-top)) 20px 8px" }}>
             <div className="flex items-center gap-2">
               <div style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: BRAND, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14 }}>P</div>
               <span style={{ fontSize: 19, fontWeight: 800, color: theme.text, letterSpacing: "-0.03em" }}>
@@ -2067,7 +2040,7 @@ export default function App() {
             backdropFilter: "blur(12px)",
             WebkitBackdropFilter: "blur(12px)",
             borderTop: `1px solid ${theme.line}`,
-            paddingBottom: 22,
+            paddingBottom: "max(8px, env(safe-area-inset-bottom))",
           }}
         >
           {NAV.map((n) => {
@@ -2083,9 +2056,6 @@ export default function App() {
 
         {/* 종목 상세 모달 */}
         {renderModal()}
-
-        {/* 홈 인디케이터 */}
-        <div style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", width: 134, height: 5, borderRadius: 999, backgroundColor: theme.text, opacity: 0.85, zIndex: 110, pointerEvents: "none" }} />
       </div>
     </div>
   );
