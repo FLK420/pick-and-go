@@ -1007,7 +1007,7 @@ export default function App() {
    *  - 프롬프트 인젝션: 반드시 INITIAL_STOCKS 안에서만 선택하도록 시스템 지침 고정
    *  - 응답: { picks: [{ id, reason, risk }] } JSON 강제
    * ------------------------------------------------------------------------- */
-  const GEMINI_MODEL = "gemini-1.5-flash";
+  const GEMINI_MODEL = "gemini-2.5-flash"; // 구버전(1.5/2.0)은 종료됨 → 2.5-flash 사용
 
   // Gemini 응답에서 순수 JSON만 안전하게 파싱 (코드펜스/잡텍스트 방어)
   function safeParseJson(raw) {
