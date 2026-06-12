@@ -19,7 +19,8 @@ const DOWN = "#3182f6"; // 하락(한국식: 파랑)
  *  - 인증정보는 import.meta.env.VITE_KIS_APP_KEY / VITE_KIS_APP_SECRET 에서 로드
  *  - 시세 조회 TR_ID는 실전·모의 공통 FHKST01010100
  * -------------------------------------------------------------------------- */
-const KIS_BASE = "/kis"; // Vite 프록시 루트 (vite.config.js 에서 한투 도메인으로 대리)
+// 로컬(dev)=Vite 프록시 /kis · 배포(prod)=Vercel 서버리스 /api/kis 자동 전환
+const KIS_BASE = import.meta.env?.DEV ? "/kis" : "/api/kis";
 // 현재가 시세(inquire-price)는 계좌 비종속이라 실전·모의 공통 FHKST01010100 으로 동작합니다.
 // 만약 본인 모의 계정 문서가 다른 값을 지시하면 아래만 "VTST01010100" 으로 바꾸세요.
 const KIS_TR_PRICE = "FHKST01010100"; // 국내주식 현재가 시세 TR_ID
@@ -32,7 +33,7 @@ const KIS_TR_PRICE = "FHKST01010100"; // 국내주식 현재가 시세 TR_ID
  *    삼성전자/SK하이닉스는 확인됨. 나머지는 본인이 corpCode.xml 로 채워 넣으세요.
  *    (빈 문자열이면 해당 종목은 DART 호출을 건너뛰고 Mock 재무를 유지합니다)
  * -------------------------------------------------------------------------- */
-const DART_BASE = "/dart"; // Vite 프록시 루트 (vite.config.js 에서 opendart.fss.or.kr 로 대리)
+const DART_BASE = import.meta.env?.DEV ? "/dart" : "/api/dart"; // dev=Vite프록시 · prod=Vercel서버리스
 const DART_CORP_CODE = {
   samsung: "00126380",   // 삼성전자 (확인됨)
   skhynix: "00164779",   // SK하이닉스 (확인됨)
