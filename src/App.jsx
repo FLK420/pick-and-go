@@ -58,11 +58,82 @@ function fmtDartAmount(raw) {
 
 // 보고서 코드 → 라벨
 const REPRT_LABEL = { "11011": "사업보고서", "11012": "반기보고서", "11013": "1분기보고서", "11014": "3분기보고서" };
+
+// 공시 접수일(YYYYMMDD) → "YYYY.MM.DD"
+function fmtRceptDt(s) {
+  const v = String(s || "");
+  return v.length === 8 ? `${v.slice(0, 4)}.${v.slice(4, 6)}.${v.slice(6, 8)}` : v;
+}
+// 공시 보고서명 → 사실 기반 한 줄 설명 (DART 공시유형을 평이하게 풀이; 추정 없음)
+function disclosureMeaning(reportNm) {
+  const t = String(reportNm || "");
+  const has = (...ks) => ks.some((k) => t.includes(k));
+  if (has("유상증자")) return "신주를 발행해 외부에서 자금을 조달하기로 한 결정 공시입니다.";
+  if (has("무상증자")) return "기존 주주에게 대가 없이 신주를 배정하는 무상증자 결정 공시입니다.";
+  if (has("자기주식취득", "자기주식 취득", "자사주")) return "회사가 자기 주식을 사들이기로 한 결정으로, 통상 주주환원·주가안정 목적입니다.";
+  if (has("자기주식처분")) return "회사가 보유한 자기주식을 처분(매각)하기로 한 결정 공시입니다.";
+  if (has("현금·현물배당", "현금배당", "배당")) return "주주에게 지급할 배당(현금·현물)을 결정한 공시입니다.";
+  if (has("주식분할", "액면분할")) return "1주를 여러 주로 쪼개는 주식분할 관련 공시입니다.";
+  if (has("합병")) return "다른 회사와의 합병에 관한 주요사항 보고 공시입니다.";
+  if (has("분할")) return "사업부문 등을 떼어내는 회사분할 관련 공시입니다.";
+  if (has("영업양수", "영업양도", "양수도")) return "사업·자산의 인수 또는 양도에 관한 결정 공시입니다.";
+  if (has("단일판매", "공급계약")) return "대규모 단일판매·공급계약 체결 사실을 알리는 공시입니다.";
+  if (has("시설투자", "신규시설")) return "생산설비 등 대규모 시설투자 결정 공시입니다.";
+  if (has("전환사채", "CB")) return "전환사채(CB) 발행 등 메자닌 자금조달 관련 공시입니다.";
+  if (has("신주인수권부사채", "BW")) return "신주인수권부사채(BW) 발행 관련 자금조달 공시입니다.";
+  if (has("교환사채", "EB")) return "교환사채(EB) 발행 관련 공시입니다.";
+  if (has("사업보고서")) return "한 해 경영·재무 실적을 담은 정기보고서(연간)입니다.";
+  if (has("반기보고서")) return "상반기 경영·재무 실적을 담은 정기보고서입니다.";
+  if (has("분기보고서")) return "분기 경영·재무 실적을 담은 정기보고서입니다.";
+  if (has("주요사항보고서")) return "투자판단에 중대한 영향을 주는 주요 경영사항 보고 공시입니다.";
+  if (has("최대주주", "소유주식", "주식등의대량보유", "지분")) return "최대주주·주요주주의 지분 변동에 관한 공시입니다.";
+  if (has("임원", "주요주주특정증권")) return "임원·주요주주의 자사 주식 보유·거래 변동 공시입니다.";
+  if (has("감사보고서")) return "외부감사인의 감사 의견을 담은 보고서입니다.";
+  if (has("정정")) return "앞서 제출한 공시의 내용을 바로잡는 정정 공시입니다.";
+  return "금융감독원 전자공시(DART)에 접수된 공식 공시입니다.";
+}
 // 기간 전환: 연간(사업보고서) / 분기(최신 분기·반기 우선). 각 (연도×보고서) 후보를 최신순으로 시도.
 const DART_PERIODS = {
   annual: { label: "연간", reprts: ["11011"], years: (y) => [y - 1, y - 2, y - 3] },
   quarter: { label: "분기", reprts: ["11014", "11012", "11013"], years: (y) => [y, y - 1] },
 };
+
+// 가격 차트 기간 설정 (점 개수·변동성·추세 강도)
+const CHART_PERIODS = {
+  "1M": { label: "1개월", points: 22, vol: 1.1, drift: 6 },
+  "3M": { label: "3개월", points: 30, vol: 1.7, drift: 12 },
+  "6M": { label: "6개월", points: 26, vol: 2.3, drift: 20 },
+  "1Y": { label: "1년", points: 40, vol: 3.1, drift: 34 },
+};
+
+// 종목·기간별 결정적(deterministic) 가격 시계열 생성 — 마지막 값은 현재가에 고정
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function genPriceSeries(stock, periodKey) {
+  const conf = CHART_PERIODS[periodKey] || CHART_PERIODS["1M"];
+  const n = conf.points;
+  let seed = hashSeed(stock.id + periodKey);
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const drift = (stock.changePct >= 0 ? 1 : -1) * conf.drift;
+  const raw = [];
+  let v = 0;
+  for (let i = 0; i < n; i++) {
+    v += (rand() - 0.48) * conf.vol;
+    raw.push(v + drift * (i / (n - 1)));
+  }
+  const last = raw[raw.length - 1];
+  const base = stock.price || 10000;
+  return raw.map((x) => Math.max(1, Math.round(base * (1 + (x - last) / 100))));
+}
 
 /* ----------------------------------------------------------------------------
  *  가상 데이터 (실서버 fetch 연동 시 동일 구조로 교체)
@@ -342,6 +413,106 @@ const INITIAL_STOCKS = [
     },
   },
 ];
+
+// ───────────────────────────────────────────────────────────────────────────
+// 확장 종목 유니버스 (코스피·코스닥 주요 ~100종목). 코드·이름·섹터만 보유.
+// 상세(AI점수·재무 등)는 비어 있어도 모달이 안전하게 렌더되도록 normalizeStock로 보정.
+// ※ 공공데이터포털 키(.env: VITE_DATA_GO_KR_KEY)가 있으면 부팅 시 전 종목 마스터로 자동 교체.
+// ───────────────────────────────────────────────────────────────────────────
+const LOGO_PALETTE = ["#0050ff", "#1428A0", "#E60012", "#00A862", "#6236FF", "#F7941E", "#0093D0", "#D81E5B", "#2E7D32", "#5C6BC0", "#00897B", "#8E24AA", "#C62828", "#1565C0"];
+function pickColor(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return LOGO_PALETTE[h % LOGO_PALETTE.length];
+}
+function mkStock([ticker, name, sector, market]) {
+  return {
+    id: "t" + ticker,
+    ticker,
+    name,
+    initial: (name || "·").trim().charAt(0),
+    logoColor: pickColor(ticker),
+    sector: sector || "기타",
+    market: market || "KOSPI",
+    price: 0,
+    change: 0,
+    changePct: 0,
+    tags: sector ? [sector] : [],
+    spark: [],
+    aiScore: null,
+    aiReason: "",
+    aiSummary: [],
+    revenue: [],
+    financials: {},
+  };
+}
+const EXTRA_RAW = [
+  ["000270", "기아", "자동차"], ["005490", "POSCO홀딩스", "철강"], ["051910", "LG화학", "화학"],
+  ["006400", "삼성SDI", "2차전지"], ["207940", "삼성바이오로직스", "바이오"], ["012330", "현대모비스", "자동차부품"],
+  ["028260", "삼성물산", "지주·상사"], ["105560", "KB금융", "금융"], ["055550", "신한지주", "금융"],
+  ["086790", "하나금융지주", "금융"], ["316140", "우리금융지주", "금융"], ["032830", "삼성생명", "보험"],
+  ["000810", "삼성화재", "보험"], ["015760", "한국전력", "전력·유틸"], ["017670", "SK텔레콤", "통신"],
+  ["030200", "KT", "통신"], ["033780", "KT&G", "필수소비재"], ["003550", "LG", "지주"],
+  ["003670", "포스코퓨처엠", "2차전지"], ["096770", "SK이노베이션", "정유·화학"], ["034730", "SK", "지주"],
+  ["018260", "삼성에스디에스", "IT서비스"], ["009150", "삼성전기", "전자부품"], ["066570", "LG전자", "전자"],
+  ["011200", "HMM", "해운"], ["010130", "고려아연", "비철금속"], ["024110", "기업은행", "금융"],
+  ["138040", "메리츠금융지주", "금융"], ["000100", "유한양행", "제약"], ["128940", "한미약품", "제약"],
+  ["326030", "SK바이오팜", "바이오"], ["302440", "SK바이오사이언스", "바이오"], ["145020", "휴젤", "바이오"],
+  ["035900", "JYP Ent.", "엔터", "KOSDAQ"], ["041510", "에스엠", "엔터", "KOSDAQ"], ["122870", "와이지엔터테인먼트", "엔터", "KOSDAQ"],
+  ["352820", "하이브", "엔터"], ["259960", "크래프톤", "게임"], ["036570", "엔씨소프트", "게임"],
+  ["251270", "넷마블", "게임"], ["293490", "카카오게임즈", "게임", "KOSDAQ"], ["263750", "펄어비스", "게임", "KOSDAQ"],
+  ["112040", "위메이드", "게임", "KOSDAQ"], ["035760", "CJ ENM", "미디어", "KOSDAQ"], ["034220", "LG디스플레이", "디스플레이"],
+  ["009830", "한화솔루션", "화학·태양광"], ["051900", "LG생활건강", "화장품·생활"], ["090430", "아모레퍼시픽", "화장품"],
+  ["161390", "한국타이어앤테크놀로지", "자동차부품"], ["000720", "현대건설", "건설"], ["006360", "GS건설", "건설"],
+  ["047040", "대우건설", "건설"], ["010140", "삼성중공업", "조선"], ["009540", "HD한국조선해양", "조선"],
+  ["042660", "한화오션", "조선"], ["329180", "HD현대중공업", "조선"], ["267250", "HD현대", "지주"],
+  ["011170", "롯데케미칼", "화학"], ["011070", "LG이노텍", "전자부품"], ["204320", "HL만도", "자동차부품"],
+  ["097950", "CJ제일제당", "음식료"], ["271560", "오리온", "음식료"], ["280360", "롯데웰푸드", "음식료"],
+  ["004370", "농심", "음식료"], ["007310", "오뚜기", "음식료"], ["000080", "하이트진로", "음식료"],
+  ["003490", "대한항공", "항공"], ["078930", "GS", "지주"], ["267260", "HD현대일렉트릭", "전력기기"],
+  ["112610", "씨에스윈드", "풍력"], ["010620", "HD현대미포", "조선"], ["051600", "한전KPS", "전력·유틸"],
+  ["052690", "한전기술", "전력·유틸"], ["036460", "한국가스공사", "에너지"], ["066970", "엘앤에프", "2차전지", "KOSDAQ"],
+  ["348370", "엔켐", "2차전지", "KOSDAQ"], ["278280", "천보", "2차전지", "KOSDAQ"], ["121600", "나노신소재", "소재", "KOSDAQ"],
+  ["042700", "한미반도체", "반도체장비"], ["000990", "DB하이텍", "반도체"], ["240810", "원익IPS", "반도체장비", "KOSDAQ"],
+  ["357780", "솔브레인", "반도체소재", "KOSDAQ"], ["058470", "리노공업", "반도체부품", "KOSDAQ"], ["140860", "파크시스템스", "장비", "KOSDAQ"],
+  ["039030", "이오테크닉스", "반도체장비", "KOSDAQ"], ["108320", "LX세미콘", "반도체", "KOSDAQ"], ["022100", "포스코DX", "IT서비스", "KOSDAQ"],
+  ["196170", "알테오젠", "바이오", "KOSDAQ"], ["214150", "클래시스", "의료기기", "KOSDAQ"], ["237690", "에스티팜", "제약", "KOSDAQ"],
+  ["091700", "파트론", "전자부품", "KOSDAQ"], ["095340", "ISC", "반도체부품", "KOSDAQ"], ["353200", "대덕전자", "전자부품"],
+  ["020150", "롯데에너지머티리얼즈", "2차전지"], ["014820", "동원시스템즈", "소재"], ["001040", "CJ", "지주"],
+  ["005830", "DB손해보험", "보험"], ["323410", "카카오뱅크", "금융"], ["377300", "카카오페이", "핀테크"],
+  ["272210", "한화시스템", "방산"], ["012450", "한화에어로스페이스", "방산"], ["079550", "LIG넥스원", "방산"],
+  ["047810", "한국항공우주", "방산"], ["010950", "S-Oil", "정유"], ["402340", "SK스퀘어", "지주"],
+];
+const EXTRA_STOCKS = EXTRA_RAW.map(mkStock);
+
+// 코드 중복 제거하며 기본 8종목 + 확장 종목을 합쳐 전체 유니버스 구성
+const SEEN_TICKERS = new Set(INITIAL_STOCKS.map((s) => s.ticker));
+const FULL_UNIVERSE = [
+  ...INITIAL_STOCKS,
+  ...EXTRA_STOCKS.filter((s) => !SEEN_TICKERS.has(s.ticker)),
+];
+const FEATURED_IDS = INITIAL_STOCKS.map((s) => s.id); // 홈 기본 노출(검색 전)
+
+// 외부 종목(공공데이터/확장)도 모달이 깨지지 않도록 누락 필드 보정
+function normalizeStock(s) {
+  return {
+    tags: [],
+    spark: [],
+    aiScore: null,
+    aiReason: "",
+    aiSummary: [],
+    revenue: [],
+    financials: {},
+    price: 0,
+    change: 0,
+    changePct: 0,
+    sector: "기타",
+    market: "KOSPI",
+    ...s,
+    initial: s.initial || (s.name || "·").trim().charAt(0),
+    logoColor: s.logoColor || pickColor(s.ticker || s.id || s.name || "x"),
+  };
+}
 
 const MOCK_NEWS = {
   samsung: [
@@ -640,6 +811,69 @@ function StarButton({ active, onClick, theme }) {
   );
 }
 
+// 가격 차트 (참고 이미지 스타일: 부드러운 곡선 채움, 기준선 위=핑크 / 아래=블루)
+function PriceChart({ series }) {
+  const W = 320, H = 132, PAD = 8;
+  if (!series || series.length < 2) return null;
+  const min = Math.min(...series), max = Math.max(...series);
+  const range = max - min || 1;
+  const xs = (i) => PAD + (i / (series.length - 1)) * (W - 2 * PAD);
+  const ys = (v) => PAD + (1 - (v - min) / range) * (H - 2 * PAD);
+  const pts = series.map((v, i) => [xs(i), ys(v)]);
+  const baselineY = ys(series[0]); // 기준선 = 시작점 가격
+  const up = series[series.length - 1] >= series[0];
+  const PINK = "#f5476b", BLUE = "#4d7cf0";
+
+  // Catmull-Rom → 베지어 변환으로 부드러운 곡선 생성
+  const smooth = (p) => {
+    if (p.length < 2) return "";
+    let d = `M${p[0][0].toFixed(1)} ${p[0][1].toFixed(1)}`;
+    for (let i = 0; i < p.length - 1; i++) {
+      const p0 = p[i - 1] || p[i];
+      const p1 = p[i];
+      const p2 = p[i + 1];
+      const p3 = p[i + 2] || p2;
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+      const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+      const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  };
+  const lineD = smooth(pts);
+  const x0 = pts[0][0].toFixed(1);
+  const xN = pts[pts.length - 1][0].toFixed(1);
+  // 핑크: 곡선~기준선 사이(기준선 위 구간만 클립). 파랑: 곡선~기준선 사이(기준선 아래 구간만 클립)
+  // → 채움의 바닥을 '차트 바닥'이 아닌 '기준선'으로 두는 게 핵심 (그래야 시작점이 최저가일 때 파랑 띠가 안 깔림)
+  const areaToBaseline = `${lineD} L${xN} ${baselineY.toFixed(1)} L${x0} ${baselineY.toFixed(1)} Z`;
+  const uid = "pc" + Math.round(baselineY * 10);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="132" preserveAspectRatio="none" style={{ display: "block" }}>
+      <defs>
+        <clipPath id={uid + "t"}><rect x="0" y="0" width={W} height={baselineY} /></clipPath>
+        <clipPath id={uid + "b"}><rect x="0" y={baselineY} width={W} height={H - baselineY} /></clipPath>
+        <linearGradient id={uid + "pg"} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={PINK} stopOpacity="0.34" />
+          <stop offset="100%" stopColor={PINK} stopOpacity="0.04" />
+        </linearGradient>
+        <linearGradient id={uid + "bg"} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor={BLUE} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={BLUE} stopOpacity="0.04" />
+        </linearGradient>
+      </defs>
+      {/* 기준선 위 구간만 핑크로 (곡선~기준선 사이) */}
+      <path d={areaToBaseline} fill={`url(#${uid}pg)`} clipPath={`url(#${uid}t)`} />
+      {/* 기준선 아래 구간만 파랑으로 (곡선~기준선 사이) → 시작점이 최저가면 비어서 안 보임 */}
+      <path d={areaToBaseline} fill={`url(#${uid}bg)`} clipPath={`url(#${uid}b)`} />
+      {/* 곡선 라인 (위=핑크 / 아래=파랑) */}
+      <path d={lineD} fill="none" stroke={PINK} strokeWidth="1.4" opacity="0.55" clipPath={`url(#${uid}t)`} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={lineD} fill="none" stroke={BLUE} strokeWidth="1.4" opacity="0.55" clipPath={`url(#${uid}b)`} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function StockRow({ stock, theme, starred, onToggleStar, onOpen, loading }) {
   const up = stock.change >= 0;
   const c = up ? UP : DOWN;
@@ -658,6 +892,11 @@ function StockRow({ stock, theme, starred, onToggleStar, onOpen, loading }) {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
           <div className="pg-shimmer" style={{ width: 50, height: 13, borderRadius: 5 }} />
           <div className="pg-shimmer" style={{ width: 74, height: 14, borderRadius: 5 }} />
+        </div>
+      ) : !stock.price ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.2, flexShrink: 0 }}>
+          <span style={{ color: theme.sub, fontSize: 12 }}>시세</span>
+          <span style={{ color: theme.sub, fontSize: 14, fontWeight: 700, marginTop: 2 }}>조회 중…</span>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.2, flexShrink: 0 }}>
@@ -691,17 +930,26 @@ export default function App() {
   const [aiError, setAiError] = useState("");
   const [aiStocks, setAiStocks] = useState(null); // null이면 기본 키워드 스크리너 표시
 
-  // 실시간 주가 (한국투자증권 KIS) — INITIAL_STOCKS를 상태로 승격해 단일 진실 공급원으로 사용
-  const [stocks, setStocks] = useState(INITIAL_STOCKS);
+  // 실시간 주가 (KIS) — 전체 유니버스를 단일 진실 공급원으로 사용
+  const [stocks, setStocks] = useState(FULL_UNIVERSE);
   const [priceLoading, setPriceLoading] = useState(true);
   const [priceLive, setPriceLive] = useState(false); // 한 종목이라도 실시간 반영 성공 여부
   const didFetchPrices = useRef(false); // StrictMode 중복/무한 호출 방어
+  const pricedRef = useRef(new Set()); // 이미 시세 조회한 종목코드(재호출 방지)
 
   // DART 실시간 재무 — 캐시 키: `${id}_${period}` (연간/분기 따로 캐싱)
   const [finData, setFinData] = useState({});
   const [finLoading, setFinLoading] = useState(false);
   const [dartPeriod, setDartPeriod] = useState("annual"); // annual | quarter
   const [fullOpen, setFullOpen] = useState(false); // 전체 재무제표 펼침 여부
+  const [chartPeriod, setChartPeriod] = useState("1M"); // 가격 차트 기간 1M|3M|6M|1Y
+  const [chartData, setChartData] = useState({}); // 일봉 차트 캐시: `${id}_${period}` → {series,live}
+  const [chartLoading, setChartLoading] = useState(false);
+  const [disclData, setDisclData] = useState({}); // DART 공시목록 캐시: id → [{report_nm,flr_nm,rcept_dt,rcept_no}]
+  const [disclLoading, setDisclLoading] = useState(false);
+  const [openNews, setOpenNews] = useState(null); // 펼쳐진 뉴스·공시 항목 키
+  const [newsSub, setNewsSub] = useState("news"); // 뉴스·공시 서브탭: news | disclosure
+  const kisTokenRef = useRef({ token: null, exp: 0 }); // KIS 접근토큰 24h 캐시 (분당 발급제한 회피)
 
   const [dark, setDark] = useState(false);
   const [notifMorning, setNotifMorning] = useState(true);
@@ -725,6 +973,12 @@ export default function App() {
     requestAnimationFrame(() => requestAnimationFrame(() => setModalShown(true)));
     setDartPeriod("annual");
     setFullOpen(false);
+    setChartPeriod("1M");
+    setOpenNews(null);
+    setNewsSub("news");
+    fetchDailyChart(s, "1M"); // KIS 실제 일봉 차트 조회
+    fetchDisclosures(s); // DART 실제 공시목록 조회
+    if (!s.price && s.ticker) fetchStockPrices([s]); // 시세 미조회 종목이면 현재가 조회
     fetchFinancialData(s, "annual"); // DART 실시간 재무 조회 (캐시 있으면 내부에서 건너뜀)
   };
   const closeStock = () => {
@@ -734,10 +988,10 @@ export default function App() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return stocks;
+    if (!q) return stocks.filter((s) => FEATURED_IDS.includes(s.id)); // 검색 전: 추천 종목만
     const tokens = q.split(/\s+/);
     return stocks.filter((s) => {
-      const hay = (s.name + " " + s.ticker + " " + s.sector + " " + s.tags.join(" ")).toLowerCase();
+      const hay = (s.name + " " + s.ticker + " " + s.sector + " " + (s.tags || []).join(" ")).toLowerCase();
       return tokens.every((t) => hay.includes(t));
     });
   }, [query, stocks]);
@@ -786,16 +1040,14 @@ export default function App() {
         throw new Error("VITE_GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.");
       }
 
-      // AI에게 넘길 종목 유니버스 (실데이터 구조 그대로, 토큰 절약 위해 필요한 필드만)
-      const universe = stocks.map((s) => ({
+      // AI에게 넘길 종목 유니버스 (토큰 절약: 핵심 필드만, 최대 150종목)
+      const universe = stocks.slice(0, 150).map((s) => ({
         id: s.id,
         name: s.name,
         sector: s.sector,
         tags: s.tags,
         price: s.price,
         changePct: s.changePct,
-        revenue: s.revenue,
-        aiScore: s.aiScore,
       }));
 
       // === 프롬프트 인젝션: 시스템 지침 ===
@@ -901,7 +1153,142 @@ export default function App() {
    *  - 종목별 개별 try/catch + 전체 try/catch → 실패 시 해당 종목/전체 Mock 유지
    *  - 실패 응답 본문(body)을 console.error 로 그대로 노출
    * ------------------------------------------------------------------------- */
-  async function fetchStockPrices() {
+  // KIS 접근토큰: 캐시 우선 반환, 없거나 만료 시 신규 발급 (분당 발급제한 회피)
+  async function getKisToken(appKey, appSecret) {
+    const cache = kisTokenRef.current;
+    if (cache.token && Date.now() < cache.exp) return cache.token;
+    const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
+      method: "POST",
+      mode: "cors",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+    });
+    if (!res.ok) {
+      let body = "";
+      try { body = await res.text(); } catch (e) { body = "(본문 읽기 실패)"; }
+      console.error("[KIS] 토큰 발급 실패 HTTP", res.status, "\nresponse body:", body);
+      throw new Error("토큰 발급 실패: HTTP " + res.status);
+    }
+    const json = await res.json();
+    if (!json.access_token) throw new Error("access_token 없음");
+    kisTokenRef.current = { token: json.access_token, exp: Date.now() + 23 * 3600 * 1000 };
+    return json.access_token;
+  }
+
+  // KIS 일봉/주봉 실제 과거 시세 조회 → 차트용 종가 시계열 (오래된→최신)
+  async function fetchDailyChart(stock, period = "1M") {
+    if (!stock) return;
+    const id = stock.id;
+    const cacheKey = `${id}_${period}`;
+    if (chartData[cacheKey]) return; // 캐시 존재 → 재호출 차단
+
+    const appKey = import.meta.env?.VITE_KIS_APP_KEY;
+    const appSecret = import.meta.env?.VITE_KIS_APP_SECRET;
+    const code = stock.ticker;
+    if (!appKey || !appSecret || !code) {
+      setChartData((prev) => ({ ...prev, [cacheKey]: { series: [], live: false } }));
+      return;
+    }
+
+    // 기간별 조회범위 + 봉 단위 (일봉은 100건 제한 → 6M·1Y는 주봉)
+    const SPAN = {
+      "1M": { div: "D", days: 40 },
+      "3M": { div: "D", days: 100 },
+      "6M": { div: "W", days: 210 },
+      "1Y": { div: "W", days: 380 },
+    };
+    const conf = SPAN[period] || SPAN["1M"];
+    const fmt = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    const end = new Date();
+    const start = new Date(Date.now() - conf.days * 86400000);
+
+    setChartLoading(true);
+    try {
+      const token = await getKisToken(appKey, appSecret);
+      const url =
+        `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice` +
+        `?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(code)}` +
+        `&FID_INPUT_DATE_1=${fmt(start)}&FID_INPUT_DATE_2=${fmt(end)}` +
+        `&FID_PERIOD_DIV_CODE=${conf.div}&FID_ORG_ADJ_PRC=0`;
+      const res = await fetch(url, {
+        method: "GET",
+        mode: "cors",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          appkey: appKey,
+          appsecret: appSecret,
+          tr_id: "FHKST03010100",
+        },
+      });
+      if (!res.ok) {
+        let body = "";
+        try { body = await res.text(); } catch (e) { body = "(본문 읽기 실패)"; }
+        console.error("[KIS chart]", id, period, "HTTP", res.status, "\nresponse body:", body);
+        throw new Error("HTTP " + res.status);
+      }
+      const json = await res.json();
+      const rows = Array.isArray(json.output2) ? json.output2 : [];
+      // 최신이 맨 앞 → 오래된→최신 순으로 뒤집고 종가만 추출
+      const series = rows
+        .map((r) => parseInt(r.stck_clpr, 10))
+        .filter((v) => isFinite(v) && v > 0)
+        .reverse();
+      setChartData((prev) => ({ ...prev, [cacheKey]: { series, live: series.length >= 2 } }));
+    } catch (err) {
+      console.error("[KIS chart] 조회 실패:", id, period, err);
+      setChartData((prev) => ({ ...prev, [cacheKey]: { series: [], live: false } }));
+    } finally {
+      setChartLoading(false);
+    }
+  }
+
+  // 차트 기간 전환
+  const switchChartPeriod = (p) => {
+    setChartPeriod(p);
+    if (selected) fetchDailyChart(selected, p);
+  };
+
+  // DART 공시목록(list.json) 실데이터 조회 → 종목별 최근 공시 (corp_code 있는 종목만)
+  async function fetchDisclosures(stock) {
+    if (!stock) return;
+    const id = stock.id;
+    if (disclData[id]) return; // 캐시
+    const key = import.meta.env?.VITE_DART_API_KEY;
+    const corp = DART_CORP_CODE[id];
+    if (!key || !corp) {
+      setDisclData((prev) => ({ ...prev, [id]: [] })); // 미지원 → 빈 배열(샘플로 폴백)
+      return;
+    }
+    const fmt = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    const end = new Date();
+    const start = new Date(Date.now() - 180 * 86400000); // 최근 6개월
+    setDisclLoading(true);
+    try {
+      const url =
+        `${DART_BASE}/api/list.json?crtfc_key=${encodeURIComponent(key)}` +
+        `&corp_code=${encodeURIComponent(corp)}` +
+        `&bgn_de=${fmt(start)}&end_de=${fmt(end)}` +
+        `&page_count=50&page_no=1`;
+      const res = await fetch(url, { method: "GET", mode: "cors" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      if (json.status !== "000") {
+        console.warn("[DART 공시]", id, json.status, json.message);
+        setDisclData((prev) => ({ ...prev, [id]: [] }));
+        return;
+      }
+      const list = Array.isArray(json.list) ? json.list : [];
+      setDisclData((prev) => ({ ...prev, [id]: list }));
+    } catch (err) {
+      console.error("[DART 공시] 조회 실패:", id, err);
+      setDisclData((prev) => ({ ...prev, [id]: [] }));
+    } finally {
+      setDisclLoading(false);
+    }
+  }
+
+  async function fetchStockPrices(list) {
     const appKey = import.meta.env?.VITE_KIS_APP_KEY;
     const appSecret = import.meta.env?.VITE_KIS_APP_SECRET;
     if (!appKey || !appSecret) {
@@ -913,35 +1300,19 @@ export default function App() {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     try {
-      // 1) 접근토큰(access_token) 발급 — 함수당 1회
-      const tokenRes = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-        method: "POST",
-        mode: "cors",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "client_credentials",
-          appkey: appKey,
-          appsecret: appSecret,
-        }),
-      });
-      if (!tokenRes.ok) {
-        let body = "";
-        try { body = await tokenRes.text(); } catch (e2) { body = "(본문 읽기 실패: " + e2 + ")"; }
-        console.error("[KIS] 토큰 발급 실패 HTTP", tokenRes.status, tokenRes.statusText, "\nresponse body:", body);
-        throw new Error("토큰 발급 실패: HTTP " + tokenRes.status + " — " + body.slice(0, 300));
-      }
-      const tokenJson = await tokenRes.json();
-      const accessToken = tokenJson.access_token;
-      if (!accessToken) {
-        console.error("[KIS] access_token 없음:", tokenJson);
-        throw new Error("access_token 없음: " + (tokenJson.error_description || JSON.stringify(tokenJson)));
-      }
+      // 1) 접근토큰 발급/재사용 (24h 캐시 → 분당 발급제한 회피)
+      const accessToken = await getKisToken(appKey, appSecret);
+      if (!accessToken) throw new Error("access_token 없음");
 
-      // 2) 종목별 현재가 순차 조회 (종목당 0.3초 딜레이로 전산망 차단 방어)
+      // 2) 종목별 현재가 순차 조회 (보이는 종목만 · 이미 받은 종목 건너뜀 · 0.3초 딜레이)
       const updates = [];
-      for (const base of INITIAL_STOCKS) {
-        const code = base.ticker; // 기존 6자리 종목코드 (예: "005930")
+      const targets = (list && list.length ? list : stocks.filter((s) => FEATURED_IDS.includes(s.id)))
+        .filter((s) => s.ticker && !pricedRef.current.has(s.ticker))
+        .slice(0, 25); // 1회 최대 25종목 (초당 제한·속도 보호)
+      for (const base of targets) {
+        const code = base.ticker;
         if (!code) continue;
+        pricedRef.current.add(code); // 재호출 방지 표시(성공·실패 무관)
         try {
           const url =
             `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price` +
@@ -1014,6 +1385,77 @@ export default function App() {
     didFetchPrices.current = true;
     fetchStockPrices();
     // 마운트 1회만 실행 (의도된 빈 deps)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 검색 결과(화면에 보이는 종목)의 시세를 디바운스 조회 (아직 안 받은 종목만)
+  useEffect(() => {
+    const kisKey = import.meta.env?.VITE_KIS_APP_KEY;
+    if (!kisKey) return;
+    const t = setTimeout(() => {
+      const need = filtered.filter((s) => s.ticker && !pricedRef.current.has(s.ticker));
+      if (need.length) fetchStockPrices(need);
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered]);
+
+  // [자동 전체 전환] 공공데이터포털 키가 있으면 전 종목 마스터를 불러와 유니버스 교체
+  // .env: VITE_DATA_GO_KR_KEY (없으면 내장 100종목 그대로 사용)
+  const didLoadMaster = useRef(false);
+  useEffect(() => {
+    const svcKey = import.meta.env?.VITE_DATA_GO_KR_KEY;
+    if (!svcKey || didLoadMaster.current) return;
+    didLoadMaster.current = true;
+
+    (async () => {
+      try {
+        // KRX상장종목정보 (금융위) — 최신 영업일 기준 전 종목. 페이지당 최대치로 1회 호출.
+        const url =
+          `/datago/1160100/service/GetKrxListedInfoService/getItemInfo` +
+          `?serviceKey=${encodeURIComponent(svcKey)}` +
+          `&numOfRows=4000&pageNo=1&resultType=json`;
+        const res = await fetch(url, { method: "GET" });
+        if (!res.ok) {
+          console.warn("[종목마스터] HTTP", res.status, "— 내장 종목 유지");
+          return;
+        }
+        const json = await res.json();
+        const items = json?.response?.body?.items?.item;
+        const arr = Array.isArray(items) ? items : items ? [items] : [];
+        if (arr.length < 50) {
+          console.warn("[종목마스터] 응답 항목 부족(", arr.length, ") — 내장 종목 유지", json);
+          return;
+        }
+
+        // 필드명은 데이터셋에 따라 다를 수 있어 후보를 폭넓게 수용
+        const pick = (o, keys) => keys.map((k) => o[k]).find((v) => v != null && v !== "");
+        const master = arr
+          .map((o) => {
+            const code = pick(o, ["srtnCd", "shotnIsin", "isinCd"]);
+            const name = pick(o, ["itmsNm", "corpNm", "isinCdNm"]);
+            const mkt = pick(o, ["mrktCtg", "mrktCls", "marketCategory"]) || "KOSPI";
+            if (!code || !name) return null;
+            const ticker = String(code).replace(/[^0-9A-Za-z]/g, "").slice(-6);
+            if (ticker.length !== 6) return null;
+            return normalizeStock({ id: "t" + ticker, ticker, name: String(name).trim(), sector: String(mkt), market: String(mkt) });
+          })
+          .filter(Boolean);
+
+        // 코드 기준 중복 제거 + 기존 8종목의 풍부한 데이터는 우선 보존
+        const byTicker = new Map();
+        for (const m of master) byTicker.set(m.ticker, m);
+        for (const base of INITIAL_STOCKS) byTicker.set(base.ticker, base); // 상세 데이터 우선
+        const merged = Array.from(byTicker.values());
+
+        if (merged.length >= 50) {
+          setStocks(merged);
+          console.info("[종목마스터] 전 종목 로드 완료:", merged.length, "종목");
+        }
+      } catch (err) {
+        console.warn("[종목마스터] 로드 실패 — 내장 종목 유지:", err);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1143,7 +1585,9 @@ export default function App() {
 
   function renderHome() {
     const aiActive = aiStocks !== null;
+    const isSearching = !aiActive && query.trim().length > 0;
     const homeList = aiActive ? aiStocks : filtered;
+    const shownList = homeList.slice(0, 50); // 렌더 과다 방지
     return (
       <div style={{ padding: "8px 20px 24px" }}>
         <div style={{ paddingTop: 8, paddingBottom: 20 }}>
@@ -1288,6 +1732,8 @@ export default function App() {
               <>
                 <span style={{ color: BRAND }}>✨</span> AI 추천 결과
               </>
+            ) : isSearching ? (
+              "검색 결과"
             ) : (
               "실시간 유망 종목"
             )}
@@ -1327,11 +1773,18 @@ export default function App() {
               {aiActive ? "AI가 조건에 맞는 종목을 찾지 못했어요" : "조건에 맞는 종목이 없어요"}
             </div>
           ) : (
-            homeList.map((s, i) => (
-              <div key={s.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${theme.line}` }}>
-                <StockRow stock={s} theme={theme} starred={stars.includes(s.id)} onToggleStar={() => toggleStar(s.id)} onOpen={() => openStock(s)} loading={priceLoading} />
-              </div>
-            ))
+            <>
+              {shownList.map((s, i) => (
+                <div key={s.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${theme.line}` }}>
+                  <StockRow stock={s} theme={theme} starred={stars.includes(s.id)} onToggleStar={() => toggleStar(s.id)} onOpen={() => openStock(s)} loading={priceLoading && FEATURED_IDS.includes(s.id)} />
+                </div>
+              ))}
+              {homeList.length > shownList.length && (
+                <div style={{ textAlign: "center", padding: "14px 0 0", fontSize: 12.5, color: theme.sub }}>
+                  상위 {shownList.length}개 표시 중 · 검색어를 좁혀 보세요 ({homeList.length}개 일치)
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1595,6 +2048,14 @@ export default function App() {
     const up = s.change >= 0;
     const c = up ? UP : DOWN;
     const news = MOCK_NEWS[s.id] || [];
+    // 가격 차트 (기간별) — KIS 실제 일봉 우선, 없으면 합성 시계열 폴백
+    const chartConf = CHART_PERIODS[chartPeriod];
+    const liveChart = chartData[`${s.id}_${chartPeriod}`];
+    const chartSeries = liveChart?.series && liveChart.series.length >= 2 ? liveChart.series : genPriceSeries(s, chartPeriod);
+    const chartIsLive = !!(liveChart?.series && liveChart.series.length >= 2);
+    const chartPending = chartLoading && liveChart === undefined;
+    const chartPct = ((chartSeries[chartSeries.length - 1] - chartSeries[0]) / chartSeries[0]) * 100;
+    const chartUp = chartPct >= 0;
     const aiNews = NEWS_AI_SUMMARY[s.id] || [];
     const R = 28;
     const CIRC = 2 * Math.PI * R;
@@ -1687,19 +2148,68 @@ export default function App() {
           <div className="pg-scroll" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
             {modalTab === "ai" ? (
               <div style={{ padding: "18px 18px 20px", backgroundColor: theme.bg }}>
+                {/* 구역 0: 가격 차트 (기간 선택) */}
+                <div style={{ ...card, paddingBottom: 14 }}>
+                  {chartPending ? (
+                    <div className="pg-shimmer" style={{ width: "100%", height: 132, borderRadius: 10 }} />
+                  ) : (
+                    <PriceChart series={chartSeries} />
+                  )}
+                  <div className="flex items-center justify-between" style={{ marginTop: 4 }}>
+                    <span style={{ fontSize: 11, color: theme.sub }}>
+                      {chartIsLive ? "한국투자증권 · 실제 시세" : "기준 시세"} · {chartConf.label}
+                    </span>
+                    {chartIsLive && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: BRAND, backgroundColor: theme.chip, padding: "1px 6px", borderRadius: 5 }}>
+                        실시간
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 14, color: theme.text, marginTop: 8 }}>
+                    지난 <b>{chartConf.label}</b> 전보다{" "}
+                    <span style={{ color: chartUp ? UP : DOWN, fontWeight: 800 }}>
+                      {Math.abs(chartPct).toFixed(2)}% {chartUp ? "상승" : "하락"}
+                    </span>
+                    했어요
+                  </div>
+                  <div className="flex" style={{ gap: 6, marginTop: 12 }}>
+                    {Object.entries(CHART_PERIODS).map(([pk, pc]) => {
+                      const on = chartPeriod === pk;
+                      return (
+                        <button
+                          key={pk}
+                          onClick={() => switchChartPeriod(pk)}
+                          style={{
+                            flex: 1,
+                            padding: "7px 0",
+                            borderRadius: 9,
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                            color: on ? "#fff" : theme.sub,
+                            backgroundColor: on ? BRAND : theme.surface,
+                            border: `1px solid ${on ? BRAND : theme.line}`,
+                          }}
+                        >
+                          {pc.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* 구역 1: AI 종합 점수 */}
                 <div className="flex items-center gap-4" style={{ background: dark ? "linear-gradient(135deg,#11203f,#0b0e14)" : "linear-gradient(135deg,#eaf0ff,#f7f9ff)", borderRadius: 16, padding: 18, marginBottom: 14, border: `1px solid ${dark ? "#1d2c4a" : "#dfe8ff"}` }}>
                   <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
                     <svg width="64" height="64" viewBox="0 0 64 64">
                       <circle cx="32" cy="32" r={R} fill="none" stroke={theme.line} strokeWidth="7" />
-                      <circle cx="32" cy="32" r={R} fill="none" stroke={BRAND} strokeWidth="7" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - s.aiScore / 100)} transform="rotate(-90 32 32)" />
+                      <circle cx="32" cy="32" r={R} fill="none" stroke={BRAND} strokeWidth="7" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - (s.aiScore || 0) / 100)} transform="rotate(-90 32 32)" />
                     </svg>
-                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: BRAND }}>{s.aiScore}</div>
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: BRAND }}>{s.aiScore ?? "–"}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: BRAND }}>AI 종합 점수</div>
                     <div style={{ fontSize: 13.5, color: theme.text, marginTop: 4, lineHeight: 1.5 }}>
-                      {s.aiScore >= 85 ? "매우 매력적인 투자 구간" : s.aiScore >= 70 ? "관심을 가질 만한 종목" : "신중한 접근이 필요한 종목"}
+                      {s.aiScore == null ? "AI로 종목 찾기를 실행하면 분석됩니다" : s.aiScore >= 85 ? "매우 매력적인 투자 구간" : s.aiScore >= 70 ? "관심을 가질 만한 종목" : "신중한 접근이 필요한 종목"}
                     </div>
                   </div>
                 </div>
@@ -1714,7 +2224,9 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <p style={{ fontSize: 14, color: theme.text, lineHeight: 1.7 }}>{s.aiReason}</p>
+                  <p style={{ fontSize: 14, color: theme.text, lineHeight: 1.7 }}>
+                    {s.aiReason || "아직 AI 분석이 없는 종목입니다. 홈의 ‘AI로 종목 찾기’를 실행하면 이 종목에 대한 분석이 채워집니다. 아래 가격 차트와 재무제표는 실시간으로 제공됩니다."}
+                  </p>
                 </div>
 
                 {/* 구역 3: 주의해야 할 리스크 */}
@@ -1728,17 +2240,20 @@ export default function App() {
                 </div>
 
                 {/* 구역 4: 3줄 요약 */}
-                <div style={card}>
-                  <div style={cardTitle}>3줄 요약</div>
-                  {s.aiSummary.map((line, i) => (
-                    <div key={i} className="flex gap-2" style={{ marginBottom: i === 2 ? 0 : 8 }}>
-                      <span style={{ color: BRAND, fontWeight: 800, flexShrink: 0 }}>{i + 1}</span>
-                      <span style={{ fontSize: 13.5, color: theme.text, lineHeight: 1.5 }}>{line}</span>
-                    </div>
-                  ))}
-                </div>
+                {s.aiSummary && s.aiSummary.length > 0 && (
+                  <div style={card}>
+                    <div style={cardTitle}>3줄 요약</div>
+                    {s.aiSummary.map((line, i) => (
+                      <div key={i} className="flex gap-2" style={{ marginBottom: i === s.aiSummary.length - 1 ? 0 : 8 }}>
+                        <span style={{ color: BRAND, fontWeight: 800, flexShrink: 0 }}>{i + 1}</span>
+                        <span style={{ fontSize: 13.5, color: theme.text, lineHeight: 1.5 }}>{line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* 구역 5: 최근 3개년 매출 추이 (항상 연간 기준) */}
+                {(revPending || dispRevenue.length >= 2) && (
                 <div style={card}>
                   <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
                     <span style={{ fontSize: 14.5, fontWeight: 800, color: theme.text }}>최근 3개년 매출 추이</span>
@@ -1771,6 +2286,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* 구역 6: Open DART 전체 재무제표 */}
                 <div style={{ ...card, padding: 0, overflow: "hidden" }}>
@@ -1897,42 +2413,128 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div style={{ padding: "20px" }}>
-                <div style={{ position: "relative", paddingLeft: 8 }}>
-                  {news.map((n, i) => {
-                    const isDart = n.type === "disclosure";
-                    return (
-                      <div key={i} className="flex gap-3" style={{ position: "relative", paddingBottom: i === news.length - 1 ? 0 : 18 }}>
-                        <div className="flex flex-col items-center" style={{ flexShrink: 0 }}>
-                          <span style={{ width: 11, height: 11, borderRadius: "50%", backgroundColor: isDart ? BRAND : theme.sub, marginTop: 4 }} />
-                          {i !== news.length - 1 && <span style={{ flex: 1, width: 2, backgroundColor: theme.line, marginTop: 2 }} />}
-                        </div>
-                        <div style={{ flex: 1, paddingBottom: 4 }}>
-                          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
-                            <span style={{ fontSize: 10.5, fontWeight: 700, color: isDart ? BRAND : theme.sub, backgroundColor: theme.chip, padding: "2px 6px", borderRadius: 5 }}>
-                              {isDart ? "공시" : "뉴스"}
-                            </span>
-                            <span style={{ fontSize: 12, color: theme.sub }}>{n.source} · {n.time}</span>
-                          </div>
-                          <div style={{ fontSize: 14.5, fontWeight: 600, color: theme.text, lineHeight: 1.45 }}>{n.title}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div style={{ padding: "18px 18px 22px" }}>
+                {(() => {
+                  // 실제 DART 공시 (corp_code 있는 종목)
+                  const realDiscl = disclData[s.id];
+                  const disclItems = (realDiscl || []).map((d) => ({
+                    kind: "disclosure",
+                    title: d.report_nm,
+                    source: "금융감독원 DART",
+                    time: fmtRceptDt(d.rcept_dt),
+                    flr: d.flr_nm,
+                    rcept: d.rcept_no,
+                    live: true,
+                  }));
+                  const sample = MOCK_NEWS[s.id] || [];
+                  // 뉴스: 샘플의 뉴스 항목 / 공시: 실데이터(없으면 샘플 공시)
+                  const newsList = sample
+                    .filter((n) => n.type !== "disclosure")
+                    .map((n) => ({ kind: "news", title: n.title, source: n.source, time: n.time }));
+                  const sampleDiscl = disclItems.length
+                    ? []
+                    : sample.filter((n) => n.type === "disclosure").map((n) => ({ kind: "disclosure", title: n.title, source: n.source, time: n.time, live: false }));
+                  const disclList = [...disclItems, ...sampleDiscl];
 
-                <div style={{ marginTop: 22, borderRadius: 16, padding: 18, background: dark ? "linear-gradient(135deg,#11203f,#0b0e14)" : "linear-gradient(135deg,#eaf0ff,#f7f9ff)", border: `1px solid ${dark ? "#1d3a6b" : "#dbe5ff"}` }}>
-                  <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
-                    <span style={{ fontSize: 16 }}>🤖</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: theme.text }}>AI가 3줄로 요약했어요</span>
-                  </div>
-                  {aiNews.map((line, i) => (
-                    <div key={i} className="flex gap-2" style={{ marginBottom: i === aiNews.length - 1 ? 0 : 8 }}>
-                      <span style={{ color: BRAND, fontWeight: 800, flexShrink: 0 }}>•</span>
-                      <span style={{ fontSize: 13.5, color: theme.text, lineHeight: 1.5 }}>{line}</span>
-                    </div>
-                  ))}
-                </div>
+                  const pending = newsSub === "disclosure" && disclLoading && realDiscl === undefined;
+                  const list = newsSub === "news" ? newsList : disclList;
+
+                  const SubTab = ({ k, label, count }) => {
+                    const on = newsSub === k;
+                    return (
+                      <button
+                        onClick={() => { setNewsSub(k); setOpenNews(null); }}
+                        style={{ flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, color: on ? "#fff" : theme.sub, backgroundColor: on ? BRAND : theme.surface, border: `1px solid ${on ? BRAND : theme.line}` }}
+                      >
+                        {label}{count != null ? ` ${count}` : ""}
+                      </button>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {/* 뉴스 / 공시 서브 토글 */}
+                      <div className="flex" style={{ gap: 8, marginBottom: 16 }}>
+                        <SubTab k="news" label="뉴스" count={newsList.length} />
+                        <SubTab k="disclosure" label="공시" count={disclItems.length || (disclList.length || null)} />
+                      </div>
+
+                      {newsSub === "disclosure" && disclItems.length > 0 && (
+                        <div style={{ fontSize: 11.5, color: theme.sub, marginBottom: 12 }}>
+                          최근 6개월 공시 {disclItems.length}건 · 금융감독원 DART 실시간
+                        </div>
+                      )}
+
+                      {pending ? (
+                        [0, 1, 2, 3].map((i) => (
+                          <div key={i} className="pg-shimmer" style={{ height: 46, borderRadius: 10, marginBottom: 10 }} />
+                        ))
+                      ) : list.length === 0 ? (
+                        <div style={{ textAlign: "center", padding: "40px 0", color: theme.sub }}>
+                          <div style={{ fontSize: 30, marginBottom: 8 }}>{newsSub === "news" ? "📰" : "📋"}</div>
+                          {newsSub === "news" ? "표시할 뉴스가 없습니다." : "최근 공시가 없습니다."}
+                        </div>
+                      ) : (
+                        list.map((n, i) => {
+                          const isDart = n.kind === "disclosure";
+                          const open = openNews === i;
+                          return (
+                            <div key={i} style={{ borderBottom: `1px solid ${theme.line}`, paddingBottom: 12, marginBottom: 12 }}>
+                              <button
+                                onClick={() => setOpenNews(open ? null : i)}
+                                style={{ width: "100%", textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start" }}
+                              >
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: isDart ? BRAND : theme.sub, backgroundColor: theme.chip, padding: "2px 7px", borderRadius: 5, flexShrink: 0, marginTop: 2 }}>
+                                  {isDart ? "공시" : "뉴스"}
+                                </span>
+                                <span style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: theme.text, lineHeight: 1.45 }}>{n.title}</span>
+                                  <span style={{ display: "block", fontSize: 12, color: theme.sub, marginTop: 3 }}>{n.source} · {n.time}</span>
+                                </span>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, marginTop: 4, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>
+                                  <path d="M6 9l6 6 6-6" stroke={theme.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+
+                              {open && (
+                                <div style={{ marginTop: 10, marginLeft: 44, padding: 14, borderRadius: 12, backgroundColor: theme.surface, border: `1px solid ${theme.line}` }}>
+                                  <div style={{ fontSize: 12, fontWeight: 800, color: BRAND, marginBottom: 6 }}>핵심 요약</div>
+                                  {isDart ? (
+                                    <>
+                                      <p style={{ fontSize: 13.5, color: theme.text, lineHeight: 1.65 }}>{disclosureMeaning(n.title)}</p>
+                                      <div style={{ fontSize: 12.5, color: theme.sub, marginTop: 8, lineHeight: 1.7 }}>
+                                        {n.flr && <>· 제출인: {n.flr}<br /></>}
+                                        · 접수일: {n.time}<br />
+                                        {n.rcept && (
+                                          <>· <a href={`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${n.rcept}`} target="_blank" rel="noreferrer" style={{ color: BRAND, fontWeight: 700 }}>DART 원문 보기 ↗</a></>
+                                        )}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p style={{ fontSize: 13.5, color: theme.text, lineHeight: 1.65 }}>
+                                        {n.source} 보도 · {n.time}. 제목: “{n.title}”.
+                                      </p>
+                                      <p style={{ fontSize: 11.5, color: theme.sub, marginTop: 8, lineHeight: 1.6 }}>
+                                        ※ 제목 기반 안내이며 기사 본문 요약이 아닙니다. 자세한 내용은 원문 기사를 확인하세요.
+                                      </p>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+
+                      <div style={{ fontSize: 11, color: theme.sub, marginTop: 6, lineHeight: 1.6 }}>
+                        {newsSub === "disclosure"
+                          ? "※ 공시는 금융감독원 DART 실데이터입니다. 투자 참고용입니다."
+                          : "※ 뉴스 항목은 샘플이며 제목 기반 안내입니다. 투자 참고용입니다."}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -1946,7 +2548,6 @@ export default function App() {
     { k: "home", label: "홈", icon: (a) => (<path d="M3 11l9-7 9 7M5 10v9h5v-5h4v5h5v-9" stroke={a ? BRAND : theme.sub} strokeWidth="1.8" strokeLinejoin="round" fill="none" />) },
     { k: "watchlist", label: "관심종목", icon: (a) => (<path d="M12 3.5l2.7 5.5 6 .9-4.3 4.2 1 6L12 17.3 6.6 20.1l1-6L3.3 9.9l6-.9z" stroke={a ? BRAND : theme.sub} strokeWidth="1.7" strokeLinejoin="round" fill={a ? BRAND : "none"} />) },
     { k: "test", label: "투자성향", icon: (a) => (<><path d="M12 3a9 9 0 100 18 9 9 0 000-18z" stroke={a ? BRAND : theme.sub} strokeWidth="1.7" fill="none" /><path d="M9.5 9.5a2.5 2.5 0 113.4 2.3c-.7.3-1 .8-1 1.5v.5" stroke={a ? BRAND : theme.sub} strokeWidth="1.7" strokeLinecap="round" fill="none" /><circle cx="11.9" cy="16.5" r="1" fill={a ? BRAND : theme.sub} /></>) },
-    { k: "news", label: "뉴스", icon: (a) => (<><rect x="3.5" y="5" width="17" height="14" rx="2" stroke={a ? BRAND : theme.sub} strokeWidth="1.7" fill="none" /><path d="M7 9h6M7 12h10M7 15h10" stroke={a ? BRAND : theme.sub} strokeWidth="1.6" strokeLinecap="round" /></>) },
     { k: "settings", label: "설정", icon: (a) => (<><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke={a ? BRAND : theme.sub} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" /><circle cx="12" cy="12" r="3" stroke={a ? BRAND : theme.sub} strokeWidth="1.6" fill="none" /></>) },
   ];
 
