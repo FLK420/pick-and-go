@@ -703,28 +703,30 @@ const LOGO_DOMAIN = {
 };
 
 function StockLogo({ stock, size = 44 }) {
-  const domain = LOGO_DOMAIN[stock.id];
-  const [imgOk, setImgOk] = useState(Boolean(domain));
+  // 네이버 증권 종목 로고 (종목코드 기반). 없으면 색상 이니셜 원으로 폴백.
+  const code = stock.ticker;
+  const [imgOk, setImgOk] = useState(Boolean(code));
 
-  if (domain && imgOk) {
+  if (code && imgOk) {
     return (
       <div
         className="flex items-center justify-center rounded-full flex-shrink-0"
         style={{ width: size, height: size, backgroundColor: "#fff", overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)" }}
       >
         <img
-          src={`https://logo.clearbit.com/${domain}`}
+          src={`https://ssl.pstatic.net/imgfinance/chart/item/logo/${code}.png`}
           alt={stock.name}
           width={size}
           height={size}
-          style={{ width: "82%", height: "82%", objectFit: "contain" }}
+          loading="lazy"
+          style={{ width: "78%", height: "78%", objectFit: "contain" }}
           onError={() => setImgOk(false)}
         />
       </div>
     );
   }
 
-  // 폴백: 기존 이니셜 원형 (로고 로딩 실패 / 도메인 미등록 시)
+  // 폴백: 색상 이니셜 원형 (로고 없음/로딩 실패 시)
   return (
     <div
       className="flex items-center justify-center rounded-full font-bold flex-shrink-0"
