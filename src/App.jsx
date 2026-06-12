@@ -1069,14 +1069,18 @@ export default function App() {
         `사용자 투자 조건: "${q}"\n\n` +
         `[종목 유니버스]\n${JSON.stringify(universe)}`;
 
+      // 인증키는 ?key= URL 파라미터가 아니라 x-goog-api-key 헤더로 전달
+      // (구글 신형 키 'AQ.' 형식과 구형 'AIza' 형식 모두 호환)
       const endpoint =
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=` +
-        encodeURIComponent(apiKey);
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
       const res = await fetch(endpoint, {
         method: "POST",
         mode: "cors",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
