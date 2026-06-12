@@ -1,8 +1,12 @@
-// Vercel 서버리스 함수: 브라우저 → /api/dart/* → 금융감독원 Open DART 중계
+// Vercel 서버리스 함수: /api/dart/* → 금융감독원 Open DART 중계
+// vercel.json rewrite가 /api/dart/<경로>?<쿼리> 를 /api/dart?subpath=<경로>&<쿼리> 로 넘겨줌
 export default async function handler(req, res) {
   const TARGET = "https://opendart.fss.or.kr";
-  const path = req.url.replace(/^\/api\/dart/, "");
-  const url = TARGET + path;
+
+  const { subpath, ...rest } = req.query || {};
+  const sp = Array.isArray(subpath) ? subpath.join("/") : (subpath || "");
+  const qs = new URLSearchParams(rest).toString();
+  const url = TARGET + "/" + sp + (qs ? "?" + qs : "");
 
   try {
     const r = await fetch(url, { method: req.method });

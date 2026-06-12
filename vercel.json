@@ -1,9 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  }
+  "rewrites": [
+    { "source": "/api/kis/:subpath*", "destination": "/api/kis?subpath=:subpath*" },
+    { "source": "/api/dart/:subpath*", "destination": "/api/dart?subpath=:subpath*" }
+  ]
 }
